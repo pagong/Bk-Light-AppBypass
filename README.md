@@ -1,12 +1,25 @@
+<div align="center">
+
+[![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://www.linux.org/)
+[![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
+[![BLE](https://img.shields.io/badge/BLE-4.0+-0082FC?logo=bluetooth&logoColor=white)](https://www.bluetooth.com/)
+[![Bleak](https://img.shields.io/badge/Bleak-BLE%20client-3776AB)](https://github.com/hbldh/bleak)
+[![Pillow](https://img.shields.io/badge/Pillow-Imaging-3776AB)](https://python-pillow.org/)
+[![PyYAML](https://img.shields.io/badge/PyYAML-Config-CB0000)](https://pyyaml.org/)
+
+</div>
+
 # BLE LED Display Toolkit
 
-Utilities for driving the BK-Light ACT1026 32×32 RGB LED matrix over Bluetooth Low Energy using the command sequence extracted from the provided logs. Other panels are not supported.
+Utilities for driving BK-Light RGB LED matrices over Bluetooth Low Energy (command sequence from device logs). **Supported panels:** 32×32 (ACT1026) and 64×16 (ACT1025). Set `panels.tile_width` and `panels.tile_height` in `config.yaml` to match your panel; the BLE handshake supports both variants automatically.
 
 Everything is now configurable through `config.yaml`, so you can define presets, multi-panel layouts, and runtime modes without touching code.
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.13+
 - `pip install bleak Pillow PyYAML`
 - Bluetooth adapter with BLE support enabled
 - Hardware capabilities:
@@ -16,7 +29,20 @@ Everything is now configurable through `config.yaml`, so you can define presets,
   - Long ATT write support (Prepare/Execute or Write-with-response handling for fragmented payloads)
   - MTU negotiation and L2CAP fragmentation
 
-The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Update the MAC address in `config.yaml` (or via `BK_LIGHT_ADDRESS`) if your unit differs.
+The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Update the MAC address in `config.yaml` (or via `BK_LIGHT_ADDRESS`) if your unit differs. For **64×16 (ACT1025)** panels use `tile_width: 64` and `tile_height: 16`; for **32×32 (ACT1026)** the default `tile_width: 32`, `tile_height: 32` is correct.
+
+## Acknowledgment (Windows / Python 3.13)
+
+If you see `ModuleNotFoundError: No module named 'bleak'` or `ModuleNotFoundError: No module named 'PIL'` after `pip install -r requirements.txt`, or a **LNK1104** / failed wheel build for `winrt-Windows.Devices.Bluetooth.GenericAttributeProfile`, you are likely using the **free-threaded** Python 3.13 build (`python3.13t`). Bleak’s Windows dependencies (winrt) do not ship pre-built wheels for that variant, so pip tries to compile them and the build often fails.
+
+Use the **standard** Python 3.13 (not the “t” build) for this project. Example:
+
+```powershell
+py -3.13 -m pip install -r requirements.txt
+py -3.13 .\scripts\production.py
+```
+
+If `py -3.13` is not available, install the non–free-threaded Python 3.13 from [python.org](https://www.python.org/downloads/) and use that interpreter for install and run.
 
 ## Project Structure
 
@@ -43,17 +69,7 @@ The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Updat
 
 2. Edit `config.yaml`.
 
-   If you don’t know your panel’s BLE MAC on macOS, discover it first:
-
-   ```bash
-   python scripts/scan_macos.py
-   ```
-
-   The scanner lists devices advertising as `LED_BLE_*`; copy the address into `config.yaml` (or set `BK_LIGHT_ADDRESS`).
-
-   macOS note: CoreBluetooth/bleak cannot initiate a connection by MAC address. Use macOS only to discover the address, then run the actual connection/production scripts from Linux or Windows where MAC-based connects are supported.
-
-   - Single panel:
+   - Single panel (32×32 default):
 
      ```yaml
      device:
@@ -61,7 +77,16 @@ The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Updat
      panels:
        list: ["F0:27:3C:1A:8B:C3"]
      display:
-       antialias_text: true # set to false for crisp bitmap text
+       antialias_text: true  # set to false for crisp bitmap text
+     ```
+
+   - Single 64×16 panel (ACT1025):
+
+     ```yaml
+     panels:
+       tile_width: 64
+       tile_height: 16
+       list: ["F0:27:3C:1A:8B:C3"]
      ```
 
    - Fonts:
@@ -72,7 +97,7 @@ The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Updat
      presets:
        clock:
          default:
-           font: "Aldo PC" # resolves to assets/fonts/Aldo PC.ttf
+           font: "Aldo PC"     # resolves to assets/fonts/Aldo PC.ttf
            size: 22
      ```
 
@@ -96,7 +121,7 @@ The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Updat
            grid_y: 0
      ```
 
-     (A bare MAC string is accepted; defaults are inferred.)
+     For 64×16 panels use `tile_width: 64`, `tile_height: 16`. A bare MAC string is accepted; defaults are inferred.
 
 3. Pick the runtime mode and preset:
 
@@ -167,7 +192,7 @@ The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Updat
       mode: scroll
       direction: left
       speed: 30.0
-      step: 3 # pixels moved per frame
+      step: 3          # pixels moved per frame
       gap: 32
       size: 18
       spacing: 2
@@ -185,10 +210,8 @@ The tools assume the screen advertises as `LED_BLE_*` (BK-Light firmware). Updat
 - `scripts/increment_counter.py` – numeric animation for diagnostics.
 - `scripts/identify_panels.py` – flashes digits on each configured panel.
 - `scripts/list_fonts.py`
-- `scripts/scan_macos.py` – macOS helper that scans for BLE devices named `LED_BLE_*` and prints their MAC addresses so you can populate `config.yaml` or `BK_LIGHT_ADDRESS`. macOS cannot connect by MAC (CoreBluetooth limitation), so use the discovered address from Linux/Windows when running the other scripts.
 
   Prints the fonts resolved from `assets/fonts/`. Bundled names and defaults:
-
   - `Aldo PC`
   - `Dolce Vita Light`
   - `Kenyan Coffee Rg`
@@ -213,7 +236,7 @@ async with PanelManager(load_config()) as manager:
 
 ## Attribution & License
 
-- Created by Puparia — GitHub: [Pupariaa](https://github.com/Pupariaa).
+- Created by Puparia — GitHub: [Pupariaa](<https://github.com/Pupariaa>).
 - Code is open-source and contributions are welcome; open a pull request with improvements or new effects.
 - If you reuse this toolkit (or derivatives) in your own projects, credit “Puparia / <https://github.com/Pupariaa>” and link back to the original repository.
 - Licensed under the [MIT License](./LICENSE).
