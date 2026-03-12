@@ -1,5 +1,5 @@
 device:
-  address: "F0:27:3C:1A:8B:C3"
+  address: "31:C3:BD:32:14:7A"
   auto_reconnect: true
   reconnect_delay: 2.0
   mtu: 2048
@@ -9,12 +9,12 @@ device:
   scan_timeout: 6.0
 
 panels:
-  tile_width: 32
-  tile_height: 32
+  tile_width: 64
+  tile_height: 16
   layout:
     columns: 1
     rows: 1
-  list: ["F0:27:3C:1A:8B:C3"]
+  list: ["31:C3:BD:32:14:7A"]
 
 display:
   frame_interval: 0.05
