@@ -96,38 +96,48 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
     offset_x_base = preset.offset_x + profile.offset_x
     offset_y_base = preset.offset_y + profile.offset_y
     try:
-        async with PanelManager(config) as manager:
-            canvas = manager.canvas_size
-            if preset.mode == "scroll":
-                gap_override = overrides.get("gap")
-                base_gap = gap_override if gap_override is not None else preset.gap
-                gap = int(base_gap) if base_gap is not None else 16
-                strip_width = max(1, text_bitmap.width + gap)
-                step_override = overrides.get("step")
-                base_step = step_override if step_override is not None else preset.step
-                step_value = int(base_step) if base_step is not None else 1
-                step = max(1, step_value)
-                interval_override = overrides.get("interval")
-                interval = float(interval_override) if interval_override is not None else float(preset.interval)
-                if interval <= 0:
-                    interval = 0.02
-                position = 0
-                while True:
-                    frame = render_scroll_frame(
-                        canvas,
-                        text_bitmap,
-                        background,
-                        preset.direction,
-                        gap,
-                        offset_x_base,
-                        offset_y_base,
-                        position,
-                    )
-                    # Small BLE pacing delay drastically improves ACT1025 stability during long scroll loops.
-                    await manager.send_image(frame, delay=0.015)
-                    await asyncio.sleep(max(interval, 0.006))
-                    position = (position + step) % strip_width
-            else:
+        if preset.mode == "scroll":
+            gap_override = overrides.get("gap")
+            base_gap = gap_override if gap_override is not None else preset.gap
+            gap = int(base_gap) if base_gap is not None else 16
+            strip_width = max(1, text_bitmap.width + gap)
+            step_override = overrides.get("step")
+            base_step = step_override if step_override is not None else preset.step
+            step_value = int(base_step) if base_step is not None else 1
+            step = max(1, step_value)
+            interval_override = overrides.get("interval")
+            interval = float(interval_override) if interval_override is not None else float(preset.interval)
+            if interval <= 0:
+                interval = 0.02
+            interval = max(interval, 0.008)
+
+            # Hardening: force periodic reconnects to avoid long-lived BLE scroll sessions freezing ACT1025.
+            frames_per_session = 120
+            reconnect_pause = 0.12
+            position = 0
+            while True:
+                async with PanelManager(config) as manager:
+                    canvas = manager.canvas_size
+                    sent = 0
+                    while sent < frames_per_session:
+                        frame = render_scroll_frame(
+                            canvas,
+                            text_bitmap,
+                            background,
+                            preset.direction,
+                            gap,
+                            offset_x_base,
+                            offset_y_base,
+                            position,
+                        )
+                        await manager.send_image(frame, delay=0.02)
+                        await asyncio.sleep(interval)
+                        position = (position + step) % strip_width
+                        sent += 1
+                await asyncio.sleep(reconnect_pause)
+        else:
+            async with PanelManager(config) as manager:
+                canvas = manager.canvas_size
                 # Auto-fit static text so it doesn't clip on small displays (e.g. 64x16)
                 while text_bitmap.width > (canvas[0] - 2) and size > 11:
                     size -= 1
