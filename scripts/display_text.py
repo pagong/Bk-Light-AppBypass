@@ -123,8 +123,9 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                         offset_y_base,
                         position,
                     )
-                    await manager.send_image(frame, delay=0.0)
-                    await asyncio.sleep(interval)
+                    # Small BLE pacing delay drastically improves ACT1025 stability during long scroll loops.
+                    await manager.send_image(frame, delay=0.015)
+                    await asyncio.sleep(max(interval, 0.006))
                     position = (position + step) % strip_width
             else:
                 # Auto-fit static text so it doesn't clip on small displays (e.g. 64x16)
