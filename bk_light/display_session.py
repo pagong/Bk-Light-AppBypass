@@ -215,8 +215,8 @@ class BleDisplaySession:
                     await asyncio.sleep(delay)
                 if skip_stage_two:
                     await asyncio.sleep(delay)
-                # Use write-without-response for frame payload to reduce BLE latency/jitter.
-                await self.client.write_gatt_char(UUID_WRITE, frame, response=False)
+                # Keep acknowledged write for frame payload: slower but much more stable on ACT1025.
+                await self.client.write_gatt_char(UUID_WRITE, frame, response=True)
                 await wait_for_ack(self.watcher.stage_three, "FRAME_ACK", self.log_notifications)
                 await asyncio.sleep(delay)
                 # await self.client.write_gatt_char(UUID_WRITE, FRAME_VALIDATION, response=False)
