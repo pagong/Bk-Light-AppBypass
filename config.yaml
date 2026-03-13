@@ -4,7 +4,7 @@ device:
   reconnect_delay: 2.0
   mtu: 2048
   rotate: 0
-  brightness: 0.15
+  brightness: 0.65
   timezone: auto
   scan_timeout: 6.0
 
