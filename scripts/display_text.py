@@ -128,7 +128,7 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                     position = (position + step) % strip_width
             else:
                 # Auto-fit static text so it doesn't clip on small displays (e.g. 64x16)
-                while text_bitmap.width > (canvas[0] - 2) and size > 8:
+                while text_bitmap.width > (canvas[0] - 2) and size > 11:
                     size -= 1
                     text_bitmap = build_text_bitmap(
                         message,
