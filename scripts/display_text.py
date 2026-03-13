@@ -101,12 +101,16 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
             if preset.mode == "scroll":
                 gap_override = overrides.get("gap")
                 base_gap = gap_override if gap_override is not None else preset.gap
-                gap = int(base_gap) if base_gap is not None else 0
+                gap = int(base_gap) if base_gap is not None else 16
                 strip_width = max(1, text_bitmap.width + gap)
                 step_override = overrides.get("step")
                 base_step = step_override if step_override is not None else preset.step
                 step_value = int(base_step) if base_step is not None else 1
                 step = max(1, step_value)
+                interval_override = overrides.get("interval")
+                interval = float(interval_override) if interval_override is not None else float(preset.interval)
+                if interval <= 0:
+                    interval = 0.02
                 position = 0
                 while True:
                     frame = render_scroll_frame(
@@ -120,9 +124,21 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                         position,
                     )
                     await manager.send_image(frame, delay=0.0)
-                    await asyncio.sleep(max(0.0, float(preset.interval)))
+                    await asyncio.sleep(interval)
                     position = (position + step) % strip_width
             else:
+                # Auto-fit static text so it doesn't clip on small displays (e.g. 64x16)
+                while text_bitmap.width > (canvas[0] - 2) and size > 8:
+                    size -= 1
+                    text_bitmap = build_text_bitmap(
+                        message,
+                        font_path,
+                        size,
+                        spacing,
+                        color,
+                        config.display.antialias_text,
+                        monospace_digits=True,
+                    )
                 frame = render_static_frame(
                     canvas,
                     text_bitmap,
@@ -130,8 +146,8 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                     offset_x_base,
                     offset_y_base,
                 )
-                await manager.send_image(frame, delay=0.15)
-                await asyncio.sleep(0.2)
+                await manager.send_image(frame, delay=0.0)
+                await asyncio.sleep(0.1)
     except asyncio.CancelledError:
         raise
     except Exception as error:
