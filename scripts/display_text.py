@@ -119,8 +119,8 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                         offset_y_base,
                         position,
                     )
-                    await manager.send_image(frame, delay=0.1)
-                    await asyncio.sleep(preset.interval)
+                    await manager.send_image(frame, delay=0.0)
+                    await asyncio.sleep(max(0.0, float(preset.interval)))
                     position = (position + step) % strip_width
             else:
                 frame = render_static_frame(
