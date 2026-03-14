@@ -68,6 +68,36 @@ def render_scroll_frame(
     return frame.convert("RGB")
 
 
+def precompute_scroll_frames(
+    canvas: tuple[int, int],
+    text_bitmap: Image.Image,
+    background: tuple[int, int, int],
+    direction: str,
+    gap: int,
+    offset_x: int,
+    offset_y: int,
+    step: int,
+) -> list[Image.Image]:
+    strip_width = max(1, text_bitmap.width + gap)
+    frame_positions = list(range(0, strip_width, max(1, step)))
+    if not frame_positions:
+        frame_positions = [0]
+    frames: list[Image.Image] = []
+    for position in frame_positions:
+        frames.append(
+            render_scroll_frame(
+                canvas,
+                text_bitmap,
+                background,
+                direction,
+                gap,
+                offset_x,
+                offset_y,
+                position,
+            )
+        )
+    return frames
+
 async def display_text(config: AppConfig, message: str, preset_name: str, overrides: dict[str, Optional[str]]) -> None:
     preset = text_options(config, preset_name, overrides)
     color = parse_color(overrides.get("color")) or parse_color(preset.color)
@@ -96,33 +126,75 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
     offset_x_base = preset.offset_x + profile.offset_x
     offset_y_base = preset.offset_y + profile.offset_y
     try:
-        async with PanelManager(config) as manager:
-            canvas = manager.canvas_size
-            if preset.mode == "scroll":
-                gap_override = overrides.get("gap")
-                base_gap = gap_override if gap_override is not None else preset.gap
-                gap = int(base_gap) if base_gap is not None else 0
-                strip_width = max(1, text_bitmap.width + gap)
-                step_override = overrides.get("step")
-                base_step = step_override if step_override is not None else preset.step
-                step_value = int(base_step) if base_step is not None else 1
-                step = max(1, step_value)
-                position = 0
+        if preset.mode == "scroll":
+            gap_override = overrides.get("gap")
+            base_gap = gap_override if gap_override is not None else preset.gap
+            gap = int(base_gap) if base_gap is not None else 16
+            strip_width = max(1, text_bitmap.width + gap)
+            step_override = overrides.get("step")
+            base_step = step_override if step_override is not None else preset.step
+            step_value = int(base_step) if base_step is not None else 1
+            step = max(1, step_value)
+            interval_override = overrides.get("interval")
+            interval = float(interval_override) if interval_override is not None else float(preset.interval)
+            if interval <= 0:
+                interval = 0.02
+            interval = max(interval, 0.008)
+
+            # Keep a persistent BLE session for smooth scrolling.
+            # Periodic reconnects introduce visible freezes on ACT1025.
+            next_tick = asyncio.get_running_loop().time()
+            async with PanelManager(config) as manager:
+                canvas = manager.canvas_size
+                # Build one full animation cycle once, then replay it in a loop.
+                # This removes per-frame rasterization jitter and mimics an "array of frames" pipeline.
+                frames = precompute_scroll_frames(
+                    canvas,
+                    text_bitmap,
+                    background,
+                    preset.direction,
+                    gap,
+                    offset_x_base,
+                    offset_y_base,
+                    step,
+                )
+                frame_index = 0
+                loop_guard_counter = 0
                 while True:
-                    frame = render_scroll_frame(
-                        canvas,
-                        text_bitmap,
-                        background,
-                        preset.direction,
-                        gap,
-                        offset_x_base,
-                        offset_y_base,
-                        position,
+                    frame = frames[frame_index]
+                    # Small transport delay avoids overdriving BLE writes (reduces end-of-run freezes).
+                    await manager.send_image(frame, delay=0.01)
+                    frame_index = (frame_index + 1) % len(frames)
+
+                    # Guardrail: brief pause at full-cycle boundaries helps avoid firmware lockups.
+                    if frame_index == 0:
+                        loop_guard_counter += 1
+                        if loop_guard_counter % 1 == 0:
+                            await asyncio.sleep(0.04)
+
+                    # Target a steady frame cadence while avoiding busy loops.
+                    next_tick += interval
+                    sleep_for = next_tick - asyncio.get_running_loop().time()
+                    if sleep_for > 0:
+                        await asyncio.sleep(sleep_for)
+                    else:
+                        # If BLE is slower than target cadence, resync to 'now'.
+                        next_tick = asyncio.get_running_loop().time()
+        else:
+            async with PanelManager(config) as manager:
+                canvas = manager.canvas_size
+                # Auto-fit static text so it doesn't clip on small displays (e.g. 64x16)
+                while text_bitmap.width > (canvas[0] - 2) and size > 11:
+                    size -= 1
+                    text_bitmap = build_text_bitmap(
+                        message,
+                        font_path,
+                        size,
+                        spacing,
+                        color,
+                        config.display.antialias_text,
+                        monospace_digits=True,
                     )
-                    await manager.send_image(frame, delay=0.1)
-                    await asyncio.sleep(preset.interval)
-                    position = (position + step) % strip_width
-            else:
                 frame = render_static_frame(
                     canvas,
                     text_bitmap,
@@ -130,8 +202,8 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                     offset_x_base,
                     offset_y_base,
                 )
-                await manager.send_image(frame, delay=0.15)
-                await asyncio.sleep(0.2)
+                await manager.send_image(frame, delay=0.0)
+                await asyncio.sleep(0.1)
     except asyncio.CancelledError:
         raise
     except Exception as error:

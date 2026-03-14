@@ -113,6 +113,9 @@ class BleDisplaySession:
         self.scan_timeout = scan_timeout
         self.client: Optional[BleakClient] = None
         self.watcher = AckWatcher(log_notifications)
+        self._handshake_primed = False
+        self._frames_since_validation = 0
+        self._validation_every = 30
 
     async def _safe_disconnect(self) -> None:
         if self.client is None:
@@ -169,6 +172,7 @@ class BleDisplaySession:
                     except Exception:
                         pass
                 await self.client.start_notify(UUID_NOTIFY, self.watcher.handler)
+                self._handshake_primed = False
                 return
             except Exception as error:
                 if not self.auto_reconnect or attempt > self.max_retries:
@@ -199,34 +203,46 @@ class BleDisplaySession:
             try:
                 await self._ensure_connected()
                 self.watcher.reset()
-                await self.client.write_gatt_char(UUID_WRITE, HANDSHAKE_FIRST, response=False)
-                await wait_for_ack(self.watcher.stage_one, "HANDSHAKE_STAGE_ONE", self.log_notifications)
-                await asyncio.sleep(delay)
-                self.watcher.stage_two.clear()
-                skip_stage_two = False
-                try:
-                    await self.client.write_gatt_char(UUID_WRITE, HANDSHAKE_SECOND, response=False)
-                    await wait_for_ack(self.watcher.stage_two, "HANDSHAKE_STAGE_TWO", self.log_notifications)
-                except asyncio.TimeoutError:
-                    skip_stage_two = True
-                    if self.log_notifications:
-                        print("HANDSHAKE_STAGE_TWO_SKIPPED")
-                else:
+
+                if not self._handshake_primed:
+                    await self.client.write_gatt_char(UUID_WRITE, HANDSHAKE_FIRST, response=False)
+                    await wait_for_ack(self.watcher.stage_one, "HANDSHAKE_STAGE_ONE", self.log_notifications)
                     await asyncio.sleep(delay)
-                if skip_stage_two:
-                    await asyncio.sleep(delay)
+                    self.watcher.stage_two.clear()
+                    skip_stage_two = False
+                    try:
+                        await self.client.write_gatt_char(UUID_WRITE, HANDSHAKE_SECOND, response=False)
+                        await wait_for_ack(self.watcher.stage_two, "HANDSHAKE_STAGE_TWO", self.log_notifications)
+                    except asyncio.TimeoutError:
+                        skip_stage_two = True
+                        if self.log_notifications:
+                            print("HANDSHAKE_STAGE_TWO_SKIPPED")
+                    else:
+                        await asyncio.sleep(delay)
+                    if skip_stage_two:
+                        await asyncio.sleep(delay)
+                    self._handshake_primed = True
+
+                # Keep acknowledged write for frame payload: slower but much more stable on ACT1025.
                 await self.client.write_gatt_char(UUID_WRITE, frame, response=True)
                 await wait_for_ack(self.watcher.stage_three, "FRAME_ACK", self.log_notifications)
+                self._frames_since_validation += 1
+                if self._frames_since_validation >= self._validation_every:
+                    await self.client.write_gatt_char(UUID_WRITE, FRAME_VALIDATION, response=False)
+                    self._frames_since_validation = 0
                 await asyncio.sleep(delay)
-                # await self.client.write_gatt_char(UUID_WRITE, FRAME_VALIDATION, response=False)
                 return
             except (asyncio.TimeoutError, BleakError, ConnectionError) as error:
+                # Force full handshake path on next retry.
+                self._handshake_primed = False
+                self._frames_since_validation = 0
                 if not self.auto_reconnect or attempt > self.max_retries:
                     await self._safe_disconnect()
                     raise error
                 await self._safe_disconnect()
                 await asyncio.sleep(self.reconnect_delay)
             except Exception as error:
+                self._handshake_primed = False
                 if not self.auto_reconnect or attempt > self.max_retries:
                     await self._safe_disconnect()
                     raise error
