@@ -111,30 +111,35 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                 interval = 0.02
             interval = max(interval, 0.008)
 
-            # Hardening: force periodic reconnects to avoid long-lived BLE scroll sessions freezing ACT1025.
-            frames_per_session = 120
-            reconnect_pause = 0.12
+            # Keep a persistent BLE session for smooth scrolling.
+            # Periodic reconnects introduce visible freezes on ACT1025.
             position = 0
-            while True:
-                async with PanelManager(config) as manager:
-                    canvas = manager.canvas_size
-                    sent = 0
-                    while sent < frames_per_session:
-                        frame = render_scroll_frame(
-                            canvas,
-                            text_bitmap,
-                            background,
-                            preset.direction,
-                            gap,
-                            offset_x_base,
-                            offset_y_base,
-                            position,
-                        )
-                        await manager.send_image(frame, delay=0.02)
-                        await asyncio.sleep(interval)
-                        position = (position + step) % strip_width
-                        sent += 1
-                await asyncio.sleep(reconnect_pause)
+            next_tick = asyncio.get_running_loop().time()
+            async with PanelManager(config) as manager:
+                canvas = manager.canvas_size
+                while True:
+                    frame = render_scroll_frame(
+                        canvas,
+                        text_bitmap,
+                        background,
+                        preset.direction,
+                        gap,
+                        offset_x_base,
+                        offset_y_base,
+                        position,
+                    )
+                    # Lower transport delay to reduce per-frame latency.
+                    await manager.send_image(frame, delay=0.0)
+                    position = (position + step) % strip_width
+
+                    # Target a steady frame cadence while avoiding busy loops.
+                    next_tick += interval
+                    sleep_for = next_tick - asyncio.get_running_loop().time()
+                    if sleep_for > 0:
+                        await asyncio.sleep(sleep_for)
+                    else:
+                        # If BLE is slower than target cadence, resync to 'now'.
+                        next_tick = asyncio.get_running_loop().time()
         else:
             async with PanelManager(config) as manager:
                 canvas = manager.canvas_size
