@@ -128,8 +128,8 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                         offset_y_base,
                         position,
                     )
-                    # Lower transport delay to reduce per-frame latency.
-                    await manager.send_image(frame, delay=0.0)
+                    # Small transport delay avoids overdriving BLE writes (reduces end-of-run freezes).
+                    await manager.send_image(frame, delay=0.01)
                     position = (position + step) % strip_width
 
                     # Target a steady frame cadence while avoiding busy loops.
