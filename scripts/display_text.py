@@ -68,6 +68,36 @@ def render_scroll_frame(
     return frame.convert("RGB")
 
 
+def precompute_scroll_frames(
+    canvas: tuple[int, int],
+    text_bitmap: Image.Image,
+    background: tuple[int, int, int],
+    direction: str,
+    gap: int,
+    offset_x: int,
+    offset_y: int,
+    step: int,
+) -> list[Image.Image]:
+    strip_width = max(1, text_bitmap.width + gap)
+    frame_positions = list(range(0, strip_width, max(1, step)))
+    if not frame_positions:
+        frame_positions = [0]
+    frames: list[Image.Image] = []
+    for position in frame_positions:
+        frames.append(
+            render_scroll_frame(
+                canvas,
+                text_bitmap,
+                background,
+                direction,
+                gap,
+                offset_x,
+                offset_y,
+                position,
+            )
+        )
+    return frames
+
 async def display_text(config: AppConfig, message: str, preset_name: str, overrides: dict[str, Optional[str]]) -> None:
     preset = text_options(config, preset_name, overrides)
     color = parse_color(overrides.get("color")) or parse_color(preset.color)
@@ -113,24 +143,27 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
 
             # Keep a persistent BLE session for smooth scrolling.
             # Periodic reconnects introduce visible freezes on ACT1025.
-            position = 0
             next_tick = asyncio.get_running_loop().time()
             async with PanelManager(config) as manager:
                 canvas = manager.canvas_size
+                # Build one full animation cycle once, then replay it in a loop.
+                # This removes per-frame rasterization jitter and mimics an "array of frames" pipeline.
+                frames = precompute_scroll_frames(
+                    canvas,
+                    text_bitmap,
+                    background,
+                    preset.direction,
+                    gap,
+                    offset_x_base,
+                    offset_y_base,
+                    step,
+                )
+                frame_index = 0
                 while True:
-                    frame = render_scroll_frame(
-                        canvas,
-                        text_bitmap,
-                        background,
-                        preset.direction,
-                        gap,
-                        offset_x_base,
-                        offset_y_base,
-                        position,
-                    )
+                    frame = frames[frame_index]
                     # Small transport delay avoids overdriving BLE writes (reduces end-of-run freezes).
                     await manager.send_image(frame, delay=0.01)
-                    position = (position + step) % strip_width
+                    frame_index = (frame_index + 1) % len(frames)
 
                     # Target a steady frame cadence while avoiding busy loops.
                     next_tick += interval
