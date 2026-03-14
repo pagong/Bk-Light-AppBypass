@@ -159,11 +159,18 @@ async def display_text(config: AppConfig, message: str, preset_name: str, overri
                     step,
                 )
                 frame_index = 0
+                loop_guard_counter = 0
                 while True:
                     frame = frames[frame_index]
                     # Small transport delay avoids overdriving BLE writes (reduces end-of-run freezes).
                     await manager.send_image(frame, delay=0.01)
                     frame_index = (frame_index + 1) % len(frames)
+
+                    # Guardrail: brief pause at full-cycle boundaries helps avoid firmware lockups.
+                    if frame_index == 0:
+                        loop_guard_counter += 1
+                        if loop_guard_counter % 1 == 0:
+                            await asyncio.sleep(0.04)
 
                     # Target a steady frame cadence while avoiding busy loops.
                     next_tick += interval

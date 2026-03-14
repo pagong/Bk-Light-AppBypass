@@ -114,6 +114,8 @@ class BleDisplaySession:
         self.client: Optional[BleakClient] = None
         self.watcher = AckWatcher(log_notifications)
         self._handshake_primed = False
+        self._frames_since_validation = 0
+        self._validation_every = 30
 
     async def _safe_disconnect(self) -> None:
         if self.client is None:
@@ -224,12 +226,16 @@ class BleDisplaySession:
                 # Keep acknowledged write for frame payload: slower but much more stable on ACT1025.
                 await self.client.write_gatt_char(UUID_WRITE, frame, response=True)
                 await wait_for_ack(self.watcher.stage_three, "FRAME_ACK", self.log_notifications)
+                self._frames_since_validation += 1
+                if self._frames_since_validation >= self._validation_every:
+                    await self.client.write_gatt_char(UUID_WRITE, FRAME_VALIDATION, response=False)
+                    self._frames_since_validation = 0
                 await asyncio.sleep(delay)
-                # await self.client.write_gatt_char(UUID_WRITE, FRAME_VALIDATION, response=False)
                 return
             except (asyncio.TimeoutError, BleakError, ConnectionError) as error:
                 # Force full handshake path on next retry.
                 self._handshake_primed = False
+                self._frames_since_validation = 0
                 if not self.auto_reconnect or attempt > self.max_retries:
                     await self._safe_disconnect()
                     raise error
